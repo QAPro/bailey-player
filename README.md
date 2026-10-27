@@ -31,6 +31,8 @@ Optional:
 | Play a web link (YouTube etc.) | Copy the link, then **Ctrl+V** and Enter. Or pick **Download best quality** to keep a copy in Videos › Bailey Player |
 | Quick settings | **Right-click** anywhere |
 | Pause | **Space**, or click the picture |
+| Skip 10 s back / forward | **J** / **L**, or **←** / **→**, or the 10 buttons by play |
+| Skip 30 s back / forward | **Shift+J** / **Shift+L**, or **Shift+←** / **Shift+→**, or the 30 buttons |
 | Full screen | Double-click, or the button at the bottom right |
 | Keyboard shortcuts | **?** |
 

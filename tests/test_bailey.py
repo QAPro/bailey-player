@@ -474,6 +474,24 @@ class Player(unittest.TestCase):
 
 
 class Installer(unittest.TestCase):
+    def test_skip_keys_and_buttons(self):
+        with open(os.path.join(ROOT, 'config', 'input.conf'), encoding='utf-8') as f:
+            binds = {}
+            for line in f:
+                parts = line.split(None, 1)
+                if parts and not line.startswith('#'):
+                    binds[parts[0]] = parts[1].split('#!')[0].strip()
+        for key, secs in [('j', -10), ('l', 10), ('J', -30), ('L', 30), ('LEFT', -10), ('RIGHT', 10),
+                          ('Shift+LEFT', -30), ('Shift+RIGHT', 30)]:
+            self.assertTrue(binds.get(key, '').startswith(f'seek {secs};'), key)
+        with open(os.path.join(ROOT, 'config', 'script-opts', 'mpv360.conf'), encoding='utf-8') as f:
+            vr_keys = {l.split('=', 1)[1].strip().lower() for l in f if '=' in l and not l.startswith('#')}
+        self.assertFalse({'j', 'l', 'shift+j', 'shift+l'} & vr_keys, 'J/L must stay free in VR mode')
+        with open(os.path.join(ROOT, 'config', 'script-opts', 'uosc.conf'), encoding='utf-8') as f:
+            controls = [l for l in f if l.startswith('controls=')][0]
+        for icon in ['replay_30', 'replay_10', 'forward_10', 'forward_30']:
+            self.assertIn(f'command:{icon}:seek', controls)
+
     def test_powershell_scripts_are_ascii(self):
         # Windows PowerShell 5.1 reads BOM-less files as ANSI; keep them plain ASCII.
         for name in ('setup.ps1', 'uninstall.ps1'):
