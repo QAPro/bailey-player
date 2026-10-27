@@ -8,7 +8,8 @@
 #   2. Puts Bailey Player's settings, scripts and fonts in %LOCALAPPDATA%\BaileyPlayer\config.
 #      Your recent list, remembered VR settings and resume points are kept on update.
 #   3. Downloads uosc (on-screen controls) and thumbfast (seek-bar thumbnails), checksum-checked.
-#   4. Adds "Bailey Player" to the Start menu and Desktop, and to "Open with" for video files.
+#   4. Makes sure yt-dlp and ffmpeg are there (for playing and downloading links).
+#   5. Adds "Bailey Player" to the Start menu and Desktop, and to "Open with" for video files.
 # Plain mpv is left exactly as it was.
 
 $ErrorActionPreference = 'Stop'
@@ -64,6 +65,32 @@ function Find-Mpv {
     return $null
 }
 
+# yt-dlp / ffmpeg: on PATH, in winget's Links folder, or in winget's package store.
+function Find-Tool([string]$Exe) {
+    $cmd = Get-Command $Exe -ErrorAction SilentlyContinue
+    if ($cmd) { return $cmd.Source }
+    $link = Join-Path $env:LOCALAPPDATA "Microsoft\WinGet\Links\$Exe"
+    if (Test-Path $link) { return $link }
+    $store = Join-Path $env:LOCALAPPDATA 'Microsoft\WinGet\Packages'
+    if (Test-Path $store) {
+        $hit = Get-ChildItem -Path $store -Recurse -Filter $Exe -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($hit) { return $hit.FullName }
+    }
+    return $null
+}
+
+function Confirm-Tool([string]$Exe, [string]$WingetId, [string]$Why) {
+    $path = Find-Tool $Exe
+    if (-not $path) {
+        Write-Host "$Exe not found - installing it with winget ($Why)..."
+        winget install --id $WingetId --exact --accept-package-agreements --accept-source-agreements | Out-Host
+        $path = Find-Tool $Exe
+    }
+    if ($path) { Write-Host "Using $path" }
+    else { Write-Host "Could not install $Exe. $Why will not work until it is installed (winget install $WingetId)." -ForegroundColor Yellow }
+    return $path
+}
+
 New-Item -ItemType Directory -Force -Path $Temp | Out-Null
 try {
     # ---- 1. mpv -------------------------------------------------------------
@@ -102,7 +129,21 @@ try {
     $text = [IO.File]::ReadAllText($tfConf) -replace '(?m)^mpv_path=.*$', ('mpv_path=' + $Mpv)
     [IO.File]::WriteAllText($tfConf, $text, $Utf8)
 
-    # ---- 4. Shortcuts and "Open with" -------------------------------------------
+    # ---- 4. Links: yt-dlp (fetches web videos) and ffmpeg (joins video + sound) --
+    Step 'Checking yt-dlp and ffmpeg (for playing and downloading links)'
+    $YtDlp  = Confirm-Tool 'yt-dlp.exe' 'yt-dlp.yt-dlp' 'Playing and downloading links'
+    $FFmpeg = Confirm-Tool 'ffmpeg.exe' 'Gyan.FFmpeg' 'Downloading in best quality'
+    $conf = "# Written by setup.ps1 - where Bailey Player finds its helpers.`r`n"
+    if ($YtDlp) { $conf += "ytdlp=$YtDlp`r`n" } else { $conf += "ytdlp=yt-dlp`r`n" }
+    if ($FFmpeg) { $conf += "ffmpeg=$FFmpeg`r`n" } else { $conf += "ffmpeg=`r`n" }
+    $conf += "download_dir=`r`n"
+    [IO.File]::WriteAllText((Join-Path $ConfigDir 'script-opts\bailey.conf'), $conf, $Utf8)
+    if ($YtDlp) {
+        # mpv's own link player uses the same yt-dlp
+        [IO.File]::WriteAllText((Join-Path $ConfigDir 'script-opts\ytdl_hook.conf'), "ytdl_path=$YtDlp`r`n", $Utf8)
+    }
+
+    # ---- 5. Shortcuts and "Open with" -------------------------------------------
     Step 'Adding shortcuts'
     $icon = Join-Path $AppDir 'bailey-player.ico'
     $configArg = '--config-dir="' + $ConfigDir + '"'

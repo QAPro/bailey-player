@@ -124,6 +124,46 @@ function M.ass_color(hex)
     return '&H' .. b .. g .. r .. '&'
 end
 
+-- A web link, trimmed, or nil. Only http(s) — that is what yt-dlp and mpv stream.
+function M.is_url(s)
+    if type(s) ~= 'string' then return nil end
+    s = s:gsub('^%s+', ''):gsub('%s+$', '')
+    if s:match('^[Hh][Tt][Tt][Pp][Ss]?://%S+$') then return s end
+    return nil
+end
+
+-- yt-dlp command line for "download the best copy, tell me where it went".
+function M.ytdlp_args(ytdlp, url, folder, ffmpeg)
+    local args = {ytdlp or 'yt-dlp',
+        '--no-playlist', '--no-mtime', '--encoding', 'utf-8',
+        '-f', 'bv*+ba/b',
+        '-P', folder,
+        '-o', '%(title).150B [%(id)s].%(ext)s',
+        '--print', 'after_move:filepath', '--no-simulate'}
+    if ffmpeg and ffmpeg ~= '' then
+        args[#args + 1] = '--ffmpeg-location'
+        args[#args + 1] = ffmpeg
+    end
+    args[#args + 1] = '--'
+    args[#args + 1] = url
+    return args
+end
+
+function M.format_size(bytes)
+    bytes = tonumber(bytes) or 0
+    if bytes >= 1024 ^ 3 then return string.format('%.1f GB', bytes / 1024 ^ 3) end
+    return string.format('%d MB', math.floor(bytes / 1024 ^ 2 + 0.5))
+end
+
+-- Last non-empty line of program output.
+function M.last_line(s)
+    local last
+    for line in (s or ''):gmatch('[^\r\n]+') do
+        if line:match('%S') then last = line end
+    end
+    return last and (last:gsub('^%s+', ''):gsub('%s+$', '')) or nil
+end
+
 -- When loaded as a library by the tests, stop here.
 if not mp.get_property then return M end
 
@@ -230,7 +270,7 @@ local function draw_start()
     local ass = {
         string.format('{\\an5\\pos(%d,%d)\\fnInter\\fs52\\b1\\bord0\\shad0\\1c%s}●{\\1c%s}  Bailey Player', cx, top, GREEN, TEXT),
         string.format('{\\an5\\pos(%d,%d)\\fnInter\\fs22\\bord0\\shad0\\1c%s}Flat or VR — it works out which.', cx, top + 48, MUTED),
-        string.format('{\\an2\\pos(%d,%d)\\fnInter\\fs20\\bord0\\shad0\\1c%s}Drop a video anywhere in this window  ·  O to open a file  ·  right-click for settings', cx, h - 28, MUTED),
+        string.format('{\\an2\\pos(%d,%d)\\fnInter\\fs20\\bord0\\shad0\\1c%s}Drop a video anywhere in this window  ·  O to open a file  ·  Ctrl+V for a link  ·  right-click for settings', cx, h - 28, MUTED),
     }
     start.data = table.concat(ass, '\n')
     start:update()
@@ -327,7 +367,7 @@ end
 local function recent_items()
     local items = {}
     for _, e in ipairs(data.recent) do
-        if utils.file_info(e.path) then
+        if M.is_url(e.path) or utils.file_info(e.path) then
             local _, name = utils.split_path(e.path)
             items[#items + 1] = {title = e.title or name, hint = e.tag, value = 'load:' .. e.path}
         end
@@ -561,13 +601,15 @@ end
 local function build_start()
     local items = {
         {title = 'Open file…', hint = 'O', value = 'open-file'},
-        {title = 'Open folder…', hint = 'Shift+O', value = 'open-folder', separator = true},
+        {title = 'Open folder…', hint = 'Shift+O', value = 'open-folder'},
+        {title = 'Open a link…', hint = 'Ctrl+V', value = 'open-link', separator = true},
     }
     for _, it in ipairs(recent_items()) do items[#items + 1] = it end
     return {
         type = 'bailey-start',
         title = 'Open a video',
         items = items,
+        on_paste = {'script-message-to', 'bailey', 'link-pasted'},
         callback = {'bailey', 'menu-event'},
         on_close = {'script-message-to', 'bailey', 'menu-closed', 'bailey-start'},
     }
@@ -593,7 +635,153 @@ end
 local function close_menus()
     mp.commandv('script-message-to', 'uosc', 'close-menu', 'bailey-quick')
     mp.commandv('script-message-to', 'uosc', 'close-menu', 'bailey-start')
+    mp.commandv('script-message-to', 'uosc', 'close-menu', 'bailey-link')
 end
+
+-------------------------------------------------------------------------------
+-- Links: play straight from the web, or download the best copy first
+-------------------------------------------------------------------------------
+
+local opts = {ytdlp = 'yt-dlp', ffmpeg = '', download_dir = ''}
+require('mp.options').read_options(opts, 'bailey')
+
+local function download_dir()
+    if opts.download_dir ~= '' then return opts.download_dir end
+    local home = os.getenv('USERPROFILE') or os.getenv('HOME') or '.'
+    return utils.join_path(utils.join_path(home, 'Videos'), 'Bailey Player')
+end
+
+local function link_items(url)
+    if not url then
+        return {
+            {title = 'Paste a link (Ctrl+V), then press Enter', muted = true, selectable = false},
+            {title = 'YouTube and most video sites work', muted = true, selectable = false},
+        }
+    end
+    return {
+        {title = 'Play now', hint = 'Enter', value = 'link-play:' .. url},
+        {title = 'Download best quality, then play', hint = 'Videos › Bailey Player', value = 'link-download:' .. url},
+    }
+end
+
+local function build_link(url, note)
+    local items = link_items(url)
+    if note then table.insert(items, 1, {title = note, muted = true, selectable = false}) end
+    return {
+        type = 'bailey-link',
+        title = 'Open a link',
+        search_style = 'palette',
+        search_debounce = 'submit',
+        search_suggestion = url,
+        on_search = {'script-message-to', 'bailey', 'link-entered'},
+        footnote = 'Enter plays it now · Download keeps a copy for offline and full quality',
+        items = items,
+        callback = {'bailey', 'menu-event'},
+        on_close = {'script-message-to', 'bailey', 'menu-closed', 'bailey-link'},
+    }
+end
+
+local function open_link()
+    local clip = M.is_url(mp.get_property('clipboard/text'))
+    uosc_menu('open-menu', build_link(clip))
+end
+
+local link_loading = false -- don't bring the start menu back while a link opens
+
+local function link_play(url)
+    link_loading = true
+    close_menus()
+    mp.osd_message('Opening link…', 3)
+    mp.commandv('loadfile', url, 'replace')
+end
+
+local download -- the running download, if any
+local dl_osd = mp.create_osd_overlay('ass-events')
+
+local function draw_download(text)
+    if not text then
+        dl_osd:remove()
+        return
+    end
+    local w, h = mp.get_osd_size()
+    if not w or w == 0 then return end
+    dl_osd.res_x, dl_osd.res_y = w, h
+    local fs, bh = 20, 30
+    local bw = #text * fs * 0.5 + 28
+    local x, y = w - 16 - bw, 52
+    dl_osd.data = string.format('{\\an7\\pos(%d,%d)\\bord1.5\\shad0\\1c%s\\1a&H30&\\3c%s\\p1}m 0 0 l %d 0 %d %d 0 %d{\\p0}',
+            x, y, PANEL, GREEN, bw, bw, bh, bh)
+        .. '\n' .. string.format('{\\an4\\pos(%d,%d)\\fnInter\\fs%d\\bord0\\shad0\\1c%s}%s',
+            x + 14, y + bh / 2, fs, TEXT, M.ass_escape(text))
+    dl_osd:update()
+end
+
+local function partial_bytes(folder)
+    local total = 0
+    for _, name in ipairs(utils.readdir(folder, 'files') or {}) do
+        if name:match('%.part$') then
+            local info = utils.file_info(utils.join_path(folder, name))
+            if info and info.size then total = total + info.size end
+        end
+    end
+    return total
+end
+
+local function start_download(url)
+    close_menus()
+    if download then
+        mp.osd_message('A download is already running — one at a time.', 3)
+        return
+    end
+    local folder = download_dir()
+    download = {url = url}
+    draw_download('Downloading…')
+    download.timer = mp.add_periodic_timer(1, function()
+        local bytes = partial_bytes(folder)
+        draw_download(bytes > 0 and ('Downloading…  ' .. M.format_size(bytes)) or 'Downloading…')
+    end)
+    mp.command_native_async({
+        name = 'subprocess',
+        playback_only = false,
+        capture_stdout = true,
+        capture_stderr = true,
+        args = M.ytdlp_args(opts.ytdlp, url, folder, opts.ffmpeg),
+    }, function(success, result)
+        if download and download.timer then download.timer:kill() end
+        download = nil
+        draw_download(nil)
+        result = result or {}
+        local path = success and result.status == 0 and M.last_line(result.stdout)
+        if path then
+            local _, name = utils.split_path(path)
+            if mp.get_property_native('idle-active') then
+                mp.commandv('loadfile', path, 'replace')
+            else
+                data.recent = M.push_recent(data.recent, {path = path, title = name}, 8)
+                save_data()
+                mp.osd_message('Downloaded: ' .. name .. '  — it is in Recent.', 5)
+            end
+        elseif result.error_string == 'init' or (result.status or 0) < 0 then
+            mp.osd_message('Download needs yt-dlp. Run the Bailey Player installer again to add it.', 8)
+        else
+            msg.warn('yt-dlp failed: ' .. tostring(result.stderr))
+            mp.osd_message('Download failed: ' .. (M.last_line(result.stderr) or 'unknown error'), 8)
+        end
+    end)
+end
+
+mp.register_script_message('link-pasted', function(text)
+    uosc_menu('open-menu', build_link(M.is_url(text)))
+end)
+
+mp.register_script_message('link-entered', function(query)
+    local url = M.is_url(query)
+    if url then
+        link_play(url)
+    else
+        uosc_menu('update-menu', build_link(nil, 'That is not a link — it should start with http'))
+    end
+end)
 
 local actions -- defined below
 
@@ -612,6 +800,9 @@ end)
 
 mp.register_script_message('menu-closed', function(menu_type)
     if menu_type == 'bailey-quick' then quick_open = false end
+    if menu_type == 'bailey-link' then
+        mp.add_timeout(0.2, function() if not link_loading then open_start() end end)
+    end
 end)
 
 actions = {
@@ -655,6 +846,9 @@ actions = {
     ['open-file'] = open_file_dialog,
     ['open-folder'] = open_folder_dialog,
     ['load'] = function(path) mp.commandv('loadfile', path, 'replace') end,
+    ['open-link'] = open_link,
+    ['link-play'] = link_play,
+    ['link-download'] = start_download,
 }
 
 -------------------------------------------------------------------------------
@@ -666,6 +860,7 @@ local function decide_vr()
     file.ready = true
     local mem = file.key and data.memory[file.key]
     local _, name = utils.split_path(file.path or '')
+    if M.is_url(file.path) then name = mp.get_property('media-title') or name end
     file.detected_vr = file.has_video and M.detect(name, file.w, file.h) ~= nil
     local tag = 'Flat'
     if not file.has_video then
@@ -686,7 +881,7 @@ local function decide_vr()
             vr_disable()
         end
     end
-    if file.path and not file.path:find('^%a+://') then
+    if file.path and (M.is_url(file.path) or not file.path:find('^%a+://')) then
         data.recent = M.push_recent(data.recent, {path = file.path, title = mp.get_property('media-title'), tag = tag}, 8)
         save_data()
     end
@@ -696,6 +891,7 @@ end
 
 mp.register_event('start-file', function()
     remember()
+    link_loading = false
     file = {path = mp.get_property('path'), ready = false, has_video = false}
     file.key = M.key(file.path)
     zoom_pan_off(true)
@@ -776,6 +972,13 @@ end)
 -------------------------------------------------------------------------------
 
 mp.register_script_message('open-file', open_file_dialog)
+mp.register_script_message('open-link', open_link)
+
+mp.register_event('end-file', function(event)
+    if event and event.reason == 'error' and M.is_url(file.path) then
+        mp.osd_message('Could not play that link. Try "Download best quality" instead.', 6)
+    end
+end)
 mp.register_script_message('open-folder', open_folder_dialog)
 mp.register_script_message('quick-settings', open_quick)
 mp.register_script_message('vr-toggle', actions['vr-toggle'])

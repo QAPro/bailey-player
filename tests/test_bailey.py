@@ -109,6 +109,30 @@ class Detect(unittest.TestCase):
         self.assertEqual(self.M.ass_color('#B39BF7'), '&HF79BB3&')
 
 
+    def test_is_url(self):
+        self.assertEqual(self.M.is_url('  https://youtu.be/abc  '), 'https://youtu.be/abc')
+        self.assertEqual(self.M.is_url('http://example.com/v.mp4'), 'http://example.com/v.mp4')
+        for bad in ['hello', 'C:\\Videos\\a.mp4', 'ftp://x/y', 'https://a b', '', None]:
+            self.assertIsNone(self.M.is_url(bad), bad)
+
+    def test_ytdlp_args(self):
+        lua = self.lua
+        args = to_py(lua, self.M.ytdlp_args('C:\\yt-dlp.exe', 'https://x/y', 'D:\\Vids', 'C:\\ffmpeg.exe'))
+        self.assertEqual(args[0], 'C:\\yt-dlp.exe')
+        self.assertEqual(args[-2:], ['--', 'https://x/y'])
+        self.assertEqual(args[args.index('-P') + 1], 'D:\\Vids')
+        self.assertEqual(args[args.index('--ffmpeg-location') + 1], 'C:\\ffmpeg.exe')
+        self.assertIn('after_move:filepath', args)
+        no_ff = to_py(lua, self.M.ytdlp_args('yt-dlp', 'https://x/y', 'D:\\Vids', ''))
+        self.assertNotIn('--ffmpeg-location', no_ff)
+
+    def test_format_size_and_last_line(self):
+        self.assertEqual(self.M.format_size(300 * 1024 * 1024), '300 MB')
+        self.assertEqual(self.M.format_size(int(2.5 * 1024 ** 3)), '2.5 GB')
+        self.assertEqual(self.M.last_line('a\r\nC:\\v\\b.webm\r\n\r\n'), 'C:\\v\\b.webm')
+        self.assertIsNone(self.M.last_line(''))
+
+
 class Player(unittest.TestCase):
     """Runs mpv360.lua + bailey.lua together against a fake mpv."""
 
@@ -276,6 +300,95 @@ class Player(unittest.TestCase):
         self.assertEqual(self.last_uosc('disable-elements'), ['bailey', 'timeline,controls,volume,top_bar'])
         self.message('mpv360', 'toggle-mouse-look')
         self.assertEqual(self.last_uosc('disable-elements'), ['bailey', ''])
+
+    def osd(self):
+        return list(to_py(self.lua, self.fake.osd) or [])
+
+    def cmds(self):
+        return [to_py(self.lua, c) for c in self.fake.commands.values()]
+
+    def test_link_box_prefills_from_clipboard(self):
+        self.fake.props['clipboard/text'] = ' https://youtu.be/abc '
+        self.message('bailey', 'open-link')
+        menu = self.last_menu()
+        self.assertEqual(menu['type'], 'bailey-link')
+        self.assertEqual(menu['search_suggestion'], 'https://youtu.be/abc')
+        self.assertEqual(menu['items'][0]['value'], 'link-play:https://youtu.be/abc')
+        self.assertEqual(menu['items'][1]['value'], 'link-download:https://youtu.be/abc')
+
+    def test_enter_on_a_link_plays_it(self):
+        self.message('bailey', 'link-entered', 'https://youtu.be/abc')
+        self.assertIn(['loadfile', 'https://youtu.be/abc', 'replace'], self.cmds())
+
+    def test_text_that_is_not_a_link_is_explained(self):
+        self.message('bailey', 'link-entered', 'roller coaster')
+        menu = self.last_menu('update-menu')
+        self.assertIn('not a link', menu['items'][0]['title'])
+        self.assertNotIn(['loadfile', 'roller coaster', 'replace'], self.cmds())
+
+    def test_paste_on_start_menu_opens_link_box(self):
+        self.fake.set('idle-active', True)
+        self.fake.run_timers()
+        self.assertEqual(self.last_menu()['on_paste'], ['script-message-to', 'bailey', 'link-pasted'])
+        self.message('bailey', 'link-pasted', 'https://youtu.be/abc')
+        self.assertEqual(self.last_menu()['search_suggestion'], 'https://youtu.be/abc')
+
+    def start_download(self):
+        self.menu_event('link-download:https://youtu.be/abc')
+        jobs = list(self.fake['async'].values())
+        self.assertTrue(jobs, 'no background job started')
+        job = jobs[-1]
+        args = to_py(self.lua, job.cmd.args)
+        self.assertEqual(args[-1], 'https://youtu.be/abc')
+        return job
+
+    def test_download_then_play(self):
+        self.fake.props['idle-active'] = True
+        job = self.start_download()
+        self.fake.dir_files = self.lua.table_from(['Coaster [abc].f401.mp4.part'])
+        self.fake.run_timers()
+        path = 'C:\\Users\\p\\Videos\\Bailey Player\\Coaster VR180 [abc].webm'
+        job.cb(True, self.lua.table_from({'status': 0, 'stdout': path + '\r\n'}))
+        self.assertIn(['loadfile', path, 'replace'], self.cmds())
+
+    def test_download_while_watching_goes_to_recent(self):
+        self.fake.props['idle-active'] = False
+        job = self.start_download()
+        path = 'C:\\Videos\\Bailey Player\\Coaster [abc].webm'
+        job.cb(True, self.lua.table_from({'status': 0, 'stdout': path}))
+        self.assertNotIn(['loadfile', path, 'replace'], self.cmds())
+        with open(os.path.join(self.tmp.name, 'bailey-data.json')) as f:
+            data = json.load(f)
+        self.assertEqual(data['recent'][0]['path'], path)
+
+    def test_download_failure_is_shown(self):
+        job = self.start_download()
+        job.cb(True, self.lua.table_from({'status': 1, 'stderr': 'ERROR: Unsupported URL: https://youtu.be/abc\n'}))
+        self.assertTrue(any('Download failed: ERROR: Unsupported URL' in m for m in self.osd()))
+
+    def test_only_one_download_at_a_time(self):
+        self.start_download()
+        before = len(self.fake['async'])
+        self.menu_event('link-download:https://youtu.be/xyz')
+        self.assertEqual(len(self.fake['async']), before)
+
+    def test_streamed_link_detected_from_its_title(self):
+        self.fake.emit('end-file')
+        self.fake.props['path'] = 'https://www.youtube.com/watch?v=abc'
+        self.fake.props['media-title'] = 'Alps 360 walk'
+        self.fake.emit('start-file')
+        self.fake.set('video-params', self.lua.table_from({'w': 3840, 'h': 1920}))
+        self.fake.run_timers()
+        self.assertEqual(self.state()['input_projection'], 0)
+        with open(os.path.join(self.tmp.name, 'bailey-data.json')) as f:
+            data = json.load(f)
+        self.assertEqual(data['recent'][0]['path'], 'https://www.youtube.com/watch?v=abc')
+
+    def test_broken_link_says_so(self):
+        self.fake.props['path'] = 'https://example.com/nothing'
+        self.fake.emit('start-file')
+        self.fake.emit('end-file', self.lua.table_from({'reason': 'error'}))
+        self.assertTrue(any('Could not play that link' in m for m in self.osd()))
 
     def test_zoom_and_pan_refused_in_vr(self):
         self.open('C:\\Videos\\Coaster VR180.webm', 5760, 2880)

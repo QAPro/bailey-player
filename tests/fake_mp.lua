@@ -23,6 +23,8 @@ local fake = {
     bindings = {},
     timers = {},
     osd = {},
+    async = {},      -- background commands: {cmd = table, cb = function}
+    dir_files = {},  -- what utils.readdir returns
 }
 
 local function record(...)
@@ -75,7 +77,10 @@ function mp.command_native(t)
     if t[1] == 'expand-path' then return fake.data_dir .. '/' .. t[2]:gsub('^~~/', '') end
     return nil
 end
-function mp.command_native_async(t, cb) record('async', t.name) end
+function mp.command_native_async(t, cb)
+    fake.async[#fake.async + 1] = {cmd = t, cb = cb}
+    record('async', t.name)
+end
 function mp.register_event(name, fn) fake.events[name] = fake.events[name] or {}; table.insert(fake.events[name], fn) end
 function mp.observe_property(name, kind, fn) table.insert(fake.observers, {name = name, fn = fn}) end
 function mp.unobserve_property(fn)
@@ -110,7 +115,9 @@ function utils.split_path(p)
     if not dir then return '.', p end
     return dir, name
 end
-function utils.file_info(p) return {is_file = true} end
+function utils.file_info(p) return {is_file = true, size = 1024 * 1024 * 300} end
+function utils.join_path(a, b) return a .. '/' .. b end
+function utils.readdir(dir, kind) return fake.dir_files end
 
 local msg = {warn = function() end, error = function() end, info = function() end, debug = function() end, verbose = function() end}
 
@@ -123,8 +130,10 @@ function fake.run_timers()
     for _, t in ipairs(pending) do if t.enabled then t.enabled = false; t.fn() end end
 end
 
-function fake.emit(event)
-    for _, fn in ipairs(fake.events[event] or {}) do fn({event = event}) end
+function fake.emit(event, extra)
+    local e = {event = event}
+    for k, v in pairs(extra or {}) do e[k] = v end
+    for _, fn in ipairs(fake.events[event] or {}) do fn(e) end
 end
 
 function fake.set(name, value) return set(name, value) end

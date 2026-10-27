@@ -28,6 +28,7 @@ Optional:
 |---|---|
 | Open a video | **O**, or the folder button, or drop a file on the window |
 | Open a whole folder | **Shift+O** |
+| Play a web link (YouTube etc.) | Copy the link, then **Ctrl+V** and Enter. Or pick **Download best quality** to keep a copy in Videos › Bailey Player |
 | Quick settings | **Right-click** anywhere |
 | Pause | **Space**, or click the picture |
 | Full screen | Double-click, or the button at the bottom right |
@@ -68,6 +69,7 @@ mpv itself stays installed.
 | [mpv360](https://github.com/kasper93/mpv360) | VR viewing; copy in `config/scripts/mpv360.lua` with small changes marked `[Bailey Player]` | MIT |
 | [thumbfast](https://github.com/po5/thumbfast) | Seek-bar thumbnails (downloaded by setup) | MPL-2.0 |
 | [Inter](https://rsms.me/inter/) | Font | OFL-1.1 |
+| [yt-dlp](https://github.com/yt-dlp/yt-dlp) + [ffmpeg](https://ffmpeg.org) | Playing and downloading links (installed by setup with winget if missing) | Unlicense / GPL |
 | `config/scripts/bailey.lua` | The glue: start screen, VR detection, quick settings, zoom & pan, RTX features | MIT |
 
 Settings live in `%LOCALAPPDATA%\BaileyPlayer\config` and mpv runs with `--config-dir` pointing
