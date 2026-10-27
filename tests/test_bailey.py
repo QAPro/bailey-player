@@ -263,6 +263,20 @@ class Player(unittest.TestCase):
         self.assertEqual(self.fake.props['video-zoom'], 0)
         self.assertIsNone(self.fake.bindings['zp-in'])
 
+    def last_uosc(self, command):
+        for cmd in reversed(list(self.fake.commands.values())):
+            c = to_py(self.lua, cmd)
+            if c[:3] == ['script-message-to', 'uosc', command]:
+                return c[3:]
+        return None
+
+    def test_controls_hide_while_looking_around(self):
+        self.open('C:\\Videos\\Coaster VR180.webm', 5760, 2880)
+        self.message('mpv360', 'toggle-mouse-look')
+        self.assertEqual(self.last_uosc('disable-elements'), ['bailey', 'timeline,controls,volume,top_bar'])
+        self.message('mpv360', 'toggle-mouse-look')
+        self.assertEqual(self.last_uosc('disable-elements'), ['bailey', ''])
+
     def test_zoom_and_pan_refused_in_vr(self):
         self.open('C:\\Videos\\Coaster VR180.webm', 5760, 2880)
         self.message('bailey', 'zoom-pan')

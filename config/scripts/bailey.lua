@@ -727,10 +727,20 @@ mp.register_event('shutdown', function()
     save_data()
 end)
 
+-- While looking around in VR the mouse never stops, so the controls would sit
+-- over the picture. Hide them for that mode; they come back when it ends.
+local ui_hidden = false
+local function hide_controls(hide)
+    if hide == ui_hidden then return end
+    ui_hidden = hide
+    to_uosc({'disable-elements', 'bailey', hide and 'timeline,controls,volume,top_bar' or ''})
+end
+
 mp.observe_property('user-data/mpv360', 'native', function(_, state)
     if type(state) ~= 'table' then return end
     local was = vr.enabled
     vr = state
+    hide_controls(vr.enabled and vr.mouse_look or false)
     if was ~= vr.enabled then
         update_vr_button()
         flash_badge(4)
