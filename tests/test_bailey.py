@@ -5,6 +5,7 @@ Run:  PYTHONPATH=<folder with lupa> python3 -m unittest discover -s tests
 """
 
 import json
+import math
 import os
 import tempfile
 import unittest
@@ -389,6 +390,61 @@ class Player(unittest.TestCase):
         self.fake.emit('start-file')
         self.fake.emit('end-file', self.lua.table_from({'reason': 'error'}))
         self.assertTrue(any('Could not play that link' in m for m in self.osd()))
+
+    def test_v_on_a_normal_video_gives_the_curved_screen(self):
+        self.open('C:\\Videos\\holiday.mp4', 1920, 1080)
+        self.menu_event('vr-toggle')
+        st = self.state()
+        self.assertTrue(st['enabled'])
+        self.assertEqual(st['input_projection'], 8)
+        self.assertAlmostEqual(st['curve_arc'], math.radians(150), places=4)
+        self.assertAlmostEqual(st['fov'], 1.7, places=4)
+        opts = ' '.join(str(c) for c in self.cmds())
+        self.assertIn('mpv360/input_projection=8', opts)
+        self.assertIn('mpv360/curve_arc=2.61', opts)
+
+    def test_curved_screen_width_changes_and_is_remembered(self):
+        self.open('C:\\Videos\\holiday.mp4', 1920, 1080)
+        self.menu_event('vr-toggle')
+        self.menu_event('curve:+', keep_open=True)
+        self.assertAlmostEqual(self.state()['curve_arc'], math.radians(165), places=4)
+        self.open('C:\\Videos\\other.mp4', 1920, 1080)
+        self.assertFalse(self.state()['enabled'])
+        self.menu_event('vr-toggle')   # other video: fresh curved screen at 150°
+        self.assertAlmostEqual(self.state()['curve_arc'], math.radians(150), places=4)
+        self.open('C:\\Videos\\holiday.mp4', 1920, 1080)
+        st = self.state()
+        self.assertTrue(st['enabled'])
+        self.assertEqual(st['input_projection'], 8)
+        self.assertAlmostEqual(st['curve_arc'], math.radians(165), places=4)
+
+    def test_curved_screen_width_has_limits(self):
+        self.open('C:\\Videos\\holiday.mp4', 1920, 1080)
+        self.menu_event('vr-toggle')
+        for _ in range(30):
+            self.menu_event('curve:-', keep_open=True)
+        self.assertAlmostEqual(self.state()['curve_arc'], math.radians(60), places=4)
+
+    def test_quick_settings_show_screen_width_on_curved(self):
+        self.open('C:\\Videos\\holiday.mp4', 1920, 1080)
+        self.menu_event('vr-toggle')
+        self.message('bailey', 'quick-settings')
+        titles = [i['title'] for i in self.last_menu()['items']]
+        self.assertIn('VR mode (curved screen)', titles)
+        self.assertIn('Screen width', titles)
+
+    def test_reset_view_on_curved_screen_fills_window(self):
+        self.open('C:\\Videos\\holiday.mp4', 1920, 1080)
+        self.menu_event('vr-toggle')
+        self.menu_event('vr-zoom:+', keep_open=True)
+        self.message('mpv360', 'reset-view')
+        self.assertAlmostEqual(self.state()['fov'], 1.7, places=4)
+
+    def test_v_on_a_vr_video_keeps_its_format(self):
+        self.open('C:\\Videos\\Coaster VR180.webm', 5760, 2880)
+        self.menu_event('vr-toggle')
+        self.menu_event('vr-toggle')
+        self.assertEqual(self.state()['input_projection'], 2)
 
     def test_zoom_and_pan_refused_in_vr(self):
         self.open('C:\\Videos\\Coaster VR180.webm', 5760, 2880)

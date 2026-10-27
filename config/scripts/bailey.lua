@@ -31,7 +31,11 @@ M.PROJECTIONS = {
     [5] = {name = 'Cylindrical', short = 'Cylindrical', dual = false},
     [6] = {name = 'Cubemap (YouTube 360°)', short = 'Cubemap', dual = false},
     [7] = {name = 'Dual cubemap', short = 'Dual cubemap', dual = true},
+    [8] = {name = 'Curved screen (normal videos)', short = 'Curved screen', dual = false},
 }
+M.CURVED = 8
+-- A normal video on a 150° curved screen, zoomed so the picture fills the window.
+M.CURVED_DEFAULTS = {input_projection = 8, eye = 0, yaw = 0, pitch = 0, fov = 1.7, curve_arc = math.rad(150)}
 M.EYES = {[0] = 'Left eye', [1] = 'Right eye', [2] = 'Both eyes (side by side)'}
 
 -- Decide whether a video is VR and which format it is.
@@ -383,7 +387,7 @@ end
 local function mpv360(...) mp.commandv('script-message-to', 'mpv360', ...) end
 
 local function vr_apply(settings)
-    for _, k in ipairs({'input_projection', 'eye', 'yaw', 'pitch', 'fov', 'fisheye_fov'}) do
+    for _, k in ipairs({'input_projection', 'eye', 'yaw', 'pitch', 'fov', 'fisheye_fov', 'curve_arc'}) do
         if settings[k] ~= nil then mpv360('set', k, tostring(settings[k])) end
     end
 end
@@ -413,6 +417,7 @@ local function remember()
         pitch = vr.pitch,
         fov = vr.fov,
         fisheye_fov = vr.fisheye_fov,
+        curve_arc = vr.curve_arc,
     }
 end
 
@@ -543,11 +548,12 @@ local function build_quick()
     local items = {}
     local function add(item) items[#items + 1] = item end
 
-    add({title = 'VR mode', hint = onoff(vr.enabled) .. '  ·  V', value = 'vr-toggle', active = vr.enabled, keep_open = true})
+    local vr_title = (file.has_video and not file.detected_vr) and 'VR mode (curved screen)' or 'VR mode'
+    add({title = vr_title, hint = onoff(vr.enabled) .. '  ·  V', value = 'vr-toggle', active = vr.enabled, keep_open = true})
     if vr.enabled then
         local p = vr.input_projection or 2
         local formats = {}
-        for i = 0, 7 do
+        for i = 0, 8 do
             formats[#formats + 1] = {title = M.PROJECTIONS[i].name, value = 'proj:' .. i, active = i == p, keep_open = true}
         end
         add({title = 'Format', hint = M.PROJECTIONS[p].short, items = formats})
@@ -555,6 +561,12 @@ local function build_quick()
             local eyes = {}
             for i = 0, 2 do eyes[#eyes + 1] = {title = M.EYES[i], value = 'eye:' .. i, active = i == (vr.eye or 0), keep_open = true} end
             add({title = 'Eye', hint = (M.EYES[vr.eye or 0] or ''):gsub(' %(side by side%)', ''), items = eyes})
+        end
+        if p == M.CURVED then
+            add({title = 'Screen width', hint = string.format('%d°', math.floor(math.deg(vr.curve_arc or math.rad(150)) + 0.5)), items = {
+                {title = 'Wider', value = 'curve:+', keep_open = true},
+                {title = 'Narrower', value = 'curve:-', keep_open = true},
+            }})
         end
         if p == 1 then
             add({title = 'Fisheye angle', hint = string.format('%d°', math.floor(math.deg(vr.fisheye_fov or math.pi) + 0.5)), items = {
@@ -811,7 +823,19 @@ actions = {
             mp.osd_message('Open a video first')
             return
         end
-        if vr.enabled then vr_disable() else vr_enable() end
+        if vr.enabled then
+            vr_disable()
+        elseif file.detected_vr then
+            vr_enable()
+        else
+            -- a normal video: back to how it was last time, or the curved screen
+            local mem = file.key and data.memory[file.key]
+            vr_enable(mem and mem.input_projection and mem or M.CURVED_DEFAULTS)
+        end
+    end,
+    ['curve'] = function(arg)
+        local step = math.rad(15) * (arg == '+' and 1 or -1)
+        mpv360('set', 'curve_arc', tostring((vr.curve_arc or math.rad(150)) + step))
     end,
     ['proj'] = function(arg) mpv360('set', 'input_projection', arg) end,
     ['eye'] = function(arg) mpv360('set', 'eye', arg) end,

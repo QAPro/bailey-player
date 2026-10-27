@@ -43,6 +43,7 @@ Optional:
 | Reset the view | **R** |
 | Switch eye | **E** |
 | VR mode on / off | **V** |
+| Watch a normal video like VR | **V** puts it on a curved cinema screen around you (150° to start). Right-click → Screen width to change it. Remembered per video |
 | Wrong format? | Right-click → Format. Your choice is remembered for that video. |
 
 **Normal videos:** press **Z** for zoom & pan (wheel zooms, drag or arrows move, 0 resets, Z or Esc ends).

@@ -32,6 +32,7 @@ dual_vert_equirectangular
 cylindrical
 equiangular_cubemap
 dual_equiangular_cubemap
+curved_screen
 
 //!PARAM eye
 //!TYPE ENUM int
@@ -44,6 +45,12 @@ both
 //!MINIMUM 1e-6
 //!MAXIMUM 6.2831853071795864
 3.1415926535897932
+
+//!PARAM curve_arc
+//!TYPE float
+//!MINIMUM 0.1
+//!MAXIMUM 6.2831853071795864
+2.6179938779914941
 
 //!PARAM sampling
 //!TYPE ENUM int
@@ -220,6 +227,16 @@ vec2 sample_cylindrical(vec3 dir) {
     return (v < -1.0 || v > 1.0) ? vec2(-1000.0) : vec2(u, (v + 1.0) * 0.5);
 }
 
+// [Bailey Player] A normal (flat) video on a curved cinema screen around the
+// viewer. The screen spans `curve_arc` radians horizontally; its height keeps
+// the video's own shape. Anything off the screen is black.
+vec2 sample_curved_screen(vec3 dir) {
+    float u = atan(dir.x, dir.z) / curve_arc + 0.5;
+    float height = curve_arc * HOOKED_size.y / HOOKED_size.x;
+    float v = (dir.y / length(dir.xz)) / height + 0.5;
+    return (u < 0.0 || u > 1.0 || v < 0.0 || v > 1.0) ? vec2(-1000.0) : vec2(u, v);
+}
+
 /*
  * YouTube Equi-Angular Cubemap (EAC) Projection
  * <https://blog.google/products/google-ar-vr/bringing-pixels-front-and-center-vr-video>
@@ -353,6 +370,9 @@ vec4 render(vec2 uv, int source_eye) {
     case equiangular_cubemap:
     case dual_equiangular_cubemap:
         coord = sample_equiangular_cubemap(dir, source_eye);
+        break;
+    case curved_screen:
+        coord = sample_curved_screen(dir);
         break;
     }
 

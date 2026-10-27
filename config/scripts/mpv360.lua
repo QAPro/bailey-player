@@ -47,6 +47,7 @@ local config = {
                                         -- 2=dual_hequirectangular, 3=hequirectangular
     eye = 0,                            -- 0=left, 1=right (for dual formats)
     fisheye_fov = math.rad(180),        -- fisheye fov (0 to 2π]
+    curve_arc = math.rad(150),          -- [Bailey Player] curved screen width
     sampling = 0,                       -- 0=linear, 1=mitchell, 2=lanczos
 
     shader_path = mp.command_native({"expand-path", "~~/shaders/mpv360.glsl"}),
@@ -79,6 +80,7 @@ local projection_names = {
     [5] = "Cylindrical",
     [6] = "Equi-Angular Cubemap",
     [7] = "Dual Equi-Angular Cubemap",
+    [8] = "Curved Screen", -- [Bailey Player]
 }
 
 local eye_names = {
@@ -135,6 +137,7 @@ local function publish_state()
         roll = config.roll,
         fov = config.fov,
         fisheye_fov = config.fisheye_fov,
+        curve_arc = config.curve_arc,
         mouse_look = mouse_look_active and true or false,
     })
 end
@@ -164,6 +167,7 @@ local function update_params()
     config.eye = clamp(config.eye, 0, #eye_names)
     config.fisheye_fov = clamp(config.fisheye_fov, eps, 2 * math.pi)
     config.sampling = clamp(config.sampling, 0, #sampling_names)
+    config.curve_arc = clamp(config.curve_arc, math.rad(60), math.rad(300))
 
     publish_state() -- [Bailey Player]
 
@@ -173,9 +177,11 @@ local function update_params()
 
     local params = string.format(
         "mpv360/fov=%f,mpv360/yaw=%f,mpv360/pitch=%f,mpv360/roll=%f," ..
-        "mpv360/input_projection=%d,mpv360/fisheye_fov=%f,mpv360/eye=%d,mpv360/sampling=%d",
+        "mpv360/input_projection=%d,mpv360/fisheye_fov=%f,mpv360/eye=%d,mpv360/sampling=%d," ..
+        "mpv360/curve_arc=%f",
         config.fov, config.yaw, config.pitch, config.roll,
-        config.input_projection, config.fisheye_fov, config.eye, config.sampling
+        config.input_projection, config.fisheye_fov, config.eye, config.sampling,
+        config.curve_arc
     )
     mp.commandv("no-osd", "change-list", "glsl-shader-opts", "add", params)
     show_values()
@@ -353,6 +359,8 @@ commands = {
         config.pitch = initial_pos.pitch
         config.roll = initial_pos.roll
         config.fov = initial_pos.fov
+        -- [Bailey Player] the curved screen starts zoomed to fill the window
+        if config.input_projection == 8 then config.fov = 1.7 end
     end,
     ["cycle-projection"] = function ()
         config.input_projection = (config.input_projection + 1) % (#projection_names + 1)
@@ -399,8 +407,8 @@ mp.register_script_message("reset-view", function ()
     update_params()
 end)
 mp.register_script_message("toggle-mouse-look", function () commands["toggle-mouse-look"]() end)
--- set <key> <number>: input_projection, eye, yaw, pitch, roll, fov, fisheye_fov
-local settable = {input_projection = true, eye = true, yaw = true, pitch = true, roll = true, fov = true, fisheye_fov = true}
+-- set <key> <number>: input_projection, eye, yaw, pitch, roll, fov, fisheye_fov, curve_arc
+local settable = {input_projection = true, eye = true, yaw = true, pitch = true, roll = true, fov = true, fisheye_fov = true, curve_arc = true}
 mp.register_script_message("set", function (key, value)
     local number = tonumber(value)
     if settable[key] and number then
