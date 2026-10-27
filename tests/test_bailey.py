@@ -256,10 +256,26 @@ class Player(unittest.TestCase):
         self.message('bailey', 'quick-settings')
         menu = self.last_menu()
         titles = [i['title'] for i in menu['items']]
-        for t in ['VR mode', 'Format', 'Eye', 'Look around', 'Reset view', 'Picture', 'Speed', 'Open file…', 'Recent']:
+        for t in ['VR mode', 'Format', 'Eye', 'Look around', 'Reset view', 'Picture', 'Speed', 'Open file…',
+                  'Open a link…', 'Screenshot (saved to the Desktop)', 'Recent']:
             self.assertIn(t, titles)
         self.assertNotIn('Zoom & pan', titles)
         self.assertEqual(menu['callback'], ['bailey', 'menu-event'])
+
+    def test_on_off_items_show_their_state(self):
+        self.open('C:\\Videos\\Coaster VR180.webm', 5760, 2880)
+        self.message('bailey', 'quick-settings')
+        items = {i['title']: i for i in self.last_menu()['items']}
+        self.assertTrue(items['VR mode']['hint'].startswith('On'))
+        self.assertTrue(items['Look around']['hint'].startswith('Off'))
+        self.message('mpv360', 'toggle-mouse-look')
+        self.message('bailey', 'quick-settings')  # closes
+        self.message('bailey', 'menu-closed', 'bailey-quick')
+        self.message('bailey', 'quick-settings')
+        items = {i['title']: i for i in self.last_menu()['items']}
+        self.assertTrue(items['Look around']['hint'].startswith('On'))
+        for sub in items['Picture']['items']:
+            self.assertRegex(sub['hint'], '^(On|Off)$', sub['title'])
 
     def test_quick_settings_menu_flat(self):
         self.open('C:\\Videos\\holiday.mp4', 1920, 1080)
@@ -532,6 +548,14 @@ class Installer(unittest.TestCase):
             controls = [l for l in f if l.startswith('controls=')][0]
         for icon in ['replay_30', 'replay_10', 'forward_10', 'forward_30']:
             self.assertIn(f'command:{icon}:seek', controls)
+
+    def test_menu_button_opens_the_live_menu(self):
+        # uosc's own menu is fixed text and can't show On/Off; ours can.
+        with open(os.path.join(ROOT, 'config', 'script-opts', 'uosc.conf'), encoding='utf-8') as f:
+            controls = [l for l in f if l.startswith('controls=')][0].split('=', 1)[1].split(',')
+        self.assertTrue(controls[0].startswith('command:menu:script-message-to bailey quick-settings'), controls[0])
+        self.assertNotIn('menu', controls)
+        self.assertEqual(sum('quick-settings' in c for c in controls), 1)
 
     def test_powershell_scripts_are_ascii(self):
         # Windows PowerShell 5.1 reads BOM-less files as ANSI; keep them plain ASCII.

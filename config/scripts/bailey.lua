@@ -585,7 +585,7 @@ local function build_quick()
                 {title = 'Narrower', value = 'fisheye:-', keep_open = true},
             }})
         end
-        add({title = 'Look around', hint = 'Click  ·  arrow keys', value = 'mouse-look'})
+        add({title = 'Look around', hint = onoff(vr.mouse_look) .. '  ·  Click', value = 'mouse-look', active = vr.mouse_look or false})
         add({title = 'Zoom in', hint = 'Wheel up', value = 'vr-zoom:-', keep_open = true})
         add({title = 'Zoom out', hint = 'Wheel down', value = 'vr-zoom:+', keep_open = true})
         add({title = 'Reset view', hint = 'R', value = 'reset-view', keep_open = true, separator = true})
@@ -606,9 +606,11 @@ local function build_quick()
     end
     add({title = 'Speed', hint = (math.abs(speed - 1) < 0.01) and 'Normal' or string.format('%g×', speed), items = speeds})
     add({title = 'Subtitles', value = 'uosc:subtitles'})
-    add({title = 'Audio track', value = 'uosc:audio', separator = true})
+    add({title = 'Audio track', value = 'uosc:audio'})
+    add({title = 'Screenshot (saved to the Desktop)', hint = 'S', value = 'screenshot', separator = true})
     add({title = 'Open file…', hint = 'O', value = 'open-file'})
     add({title = 'Open folder…', hint = 'Shift+O', value = 'open-folder'})
+    add({title = 'Open a link…', hint = 'Ctrl+V', value = 'open-link'})
     add({title = 'Recent', items = recent_items(), separator = true})
     add({title = 'Keyboard shortcuts', hint = '?', value = 'uosc:keybinds'})
 
@@ -897,6 +899,7 @@ actions = {
     ['speed'] = function(arg) mp.set_property_number('speed', tonumber(arg) or 1) end,
     ['uosc'] = function(arg) mp.commandv('script-binding', 'uosc/' .. arg) end,
     ['open-file'] = open_file_dialog,
+    ['screenshot'] = function() mp.commandv('screenshot') end,
     ['open-folder'] = open_folder_dialog,
     ['load'] = function(path) mp.commandv('loadfile', path, 'replace') end,
     ['open-link'] = function() open_link() end,
