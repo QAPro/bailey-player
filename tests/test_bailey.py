@@ -110,6 +110,13 @@ class Detect(unittest.TestCase):
         self.assertEqual(self.M.ass_color('#B39BF7'), '&HF79BB3&')
 
 
+    def test_link_in_finds_the_last_link(self):
+        f = self.M.link_in
+        self.assertEqual(f('https://youtu.be/oldhttps://youtu.be/new'), 'https://youtu.be/new')
+        self.assertEqual(f('  watch HTTPS://x.com/v  '), 'HTTPS://x.com/v')
+        self.assertIsNone(f('roller coaster'))
+        self.assertIsNone(f(''))
+
     def test_is_url(self):
         self.assertEqual(self.M.is_url('  https://youtu.be/abc  '), 'https://youtu.be/abc')
         self.assertEqual(self.M.is_url('http://example.com/v.mp4'), 'http://example.com/v.mp4')
@@ -308,24 +315,51 @@ class Player(unittest.TestCase):
     def cmds(self):
         return [to_py(self.lua, c) for c in self.fake.commands.values()]
 
-    def test_link_box_prefills_from_clipboard(self):
-        self.fake.props['clipboard/text'] = ' https://youtu.be/abc '
+    def test_link_box_opens_empty(self):
+        self.fake.props['clipboard/text'] = 'https://youtu.be/old'
         self.message('bailey', 'open-link')
         menu = self.last_menu()
         self.assertEqual(menu['type'], 'bailey-link')
+        self.assertIsNone(menu.get('search_suggestion'))
+        self.assertIn('Paste a link', menu['items'][0]['title'])
+
+    def test_ctrl_v_opens_link_box_with_the_copied_link(self):
+        self.fake.props['clipboard/text'] = ' https://youtu.be/abc '
+        self.message('bailey', 'paste-link')
+        menu = self.last_menu()
         self.assertEqual(menu['search_suggestion'], 'https://youtu.be/abc')
         self.assertEqual(menu['items'][0]['value'], 'link-play:https://youtu.be/abc')
         self.assertEqual(menu['items'][1]['value'], 'link-download:https://youtu.be/abc')
 
-    def test_enter_on_a_link_plays_it(self):
-        self.message('bailey', 'link-entered', 'https://youtu.be/abc')
+    def test_options_follow_what_is_typed(self):
+        self.fake.props['clipboard/text'] = 'https://youtu.be/old'
+        self.message('bailey', 'paste-link')
+        self.message('bailey', 'link-typed', 'https://youtu.be/new')
+        menu = self.last_menu('update-menu')
+        self.assertIsNone(menu.get('search_suggestion'), 'an update must not reset the box')
+        self.assertEqual(menu['items'][0]['value'], 'link-play:https://youtu.be/new')
+        self.assertEqual(menu['items'][1]['value'], 'link-download:https://youtu.be/new')
+
+    def test_enter_plays_what_is_in_the_box(self):
+        self.message('bailey', 'open-link')
+        self.message('bailey', 'link-typed', 'https://youtu.be/abc')
+        self.message('bailey', 'menu-event', json.dumps({'type': 'key', 'id': 'enter', 'key': 'enter'}))
         self.assertIn(['loadfile', 'https://youtu.be/abc', 'replace'], self.cmds())
 
+    def test_enter_does_nothing_once_the_box_is_closed(self):
+        self.message('bailey', 'open-link')
+        self.message('bailey', 'link-typed', 'https://youtu.be/abc')
+        self.message('bailey', 'menu-closed', 'bailey-link')
+        self.message('bailey', 'menu-event', json.dumps({'type': 'key', 'id': 'enter', 'key': 'enter'}))
+        self.assertNotIn(['loadfile', 'https://youtu.be/abc', 'replace'], self.cmds())
+
     def test_text_that_is_not_a_link_is_explained(self):
-        self.message('bailey', 'link-entered', 'roller coaster')
+        self.message('bailey', 'open-link')
+        self.message('bailey', 'link-typed', 'roller coaster')
         menu = self.last_menu('update-menu')
         self.assertIn('not a link', menu['items'][0]['title'])
-        self.assertNotIn(['loadfile', 'roller coaster', 'replace'], self.cmds())
+        self.message('bailey', 'menu-event', json.dumps({'type': 'key', 'id': 'enter', 'key': 'enter'}))
+        self.assertFalse([c for c in self.cmds() if c[:1] == ['loadfile']])
 
     def test_paste_on_start_menu_opens_link_box(self):
         self.fake.set('idle-active', True)
@@ -333,6 +367,13 @@ class Player(unittest.TestCase):
         self.assertEqual(self.last_menu()['on_paste'], ['script-message-to', 'bailey', 'link-pasted'])
         self.message('bailey', 'link-pasted', 'https://youtu.be/abc')
         self.assertEqual(self.last_menu()['search_suggestion'], 'https://youtu.be/abc')
+
+    def test_main_menu_has_no_comment_lines(self):
+        with open(os.path.join(ROOT, 'config', 'input.conf'), encoding='utf-8') as fh:
+            for line in fh:
+                if line.startswith('#') and '#!' in line:
+                    self.assertRegex(line, r'^#\s+\S+.*#!', 'a comment would show up in the ☰ menu: ' + line)
+                    self.assertNotIn('`', line, 'a comment would show up in the ☰ menu: ' + line)
 
     def start_download(self):
         self.menu_event('link-download:https://youtu.be/abc')

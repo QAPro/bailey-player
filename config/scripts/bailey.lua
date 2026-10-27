@@ -136,6 +136,17 @@ function M.is_url(s)
     return nil
 end
 
+-- The web link inside whatever is typed in the link box, or nil. Takes the
+-- last one, so pasting onto an old link still finds the new one.
+function M.link_in(s)
+    if type(s) ~= 'string' then return nil end
+    local lower = s:lower()
+    local start
+    for i in lower:gmatch('()https?://') do start = i end
+    if not start then return nil end
+    return M.is_url(s:sub(start):match('^%S+'))
+end
+
 -- yt-dlp command line for "download the best copy, tell me where it went".
 function M.ytdlp_args(ytdlp, url, folder, ffmpeg)
     local args = {ytdlp or 'yt-dlp',
@@ -663,10 +674,13 @@ local function download_dir()
     return utils.join_path(utils.join_path(home, 'Videos'), 'Bailey Player')
 end
 
-local function link_items(url)
+local function link_items(text)
+    local url = M.link_in(text)
     if not url then
+        local blank = not text or not text:match('%S')
         return {
-            {title = 'Paste a link (Ctrl+V), then press Enter', muted = true, selectable = false},
+            {title = blank and 'Paste a link (Ctrl+V), then press Enter'
+                or 'That is not a link yet — it should start with http', muted = true, selectable = false},
             {title = 'YouTube and most video sites work', muted = true, selectable = false},
         }
     end
@@ -676,26 +690,34 @@ local function link_items(url)
     }
 end
 
-local function build_link(url, note)
-    local items = link_items(url)
-    if note then table.insert(items, 1, {title = note, muted = true, selectable = false}) end
+-- The link box. The options under it always follow what is in the box.
+-- `prefill` only on first open (a paste); updates keep what was typed.
+local link_text -- what is in the box now; nil when the box is closed
+
+local function build_link(text, prefill)
     return {
         type = 'bailey-link',
         title = 'Open a link',
         search_style = 'palette',
-        search_debounce = 'submit',
-        search_suggestion = url,
-        on_search = {'script-message-to', 'bailey', 'link-entered'},
-        footnote = 'Enter plays it now · Download keeps a copy for offline and full quality',
-        items = items,
+        search_debounce = 0,
+        search_suggestion = prefill and text or nil,
+        on_search = {'script-message-to', 'bailey', 'link-typed'},
+        footnote = 'Ctrl+V pastes · Shift+Backspace clears · Enter plays',
+        items = link_items(text),
         callback = {'bailey', 'menu-event'},
         on_close = {'script-message-to', 'bailey', 'menu-closed', 'bailey-link'},
     }
 end
 
-local function open_link()
-    local clip = M.is_url(mp.get_property('clipboard/text'))
-    uosc_menu('open-menu', build_link(clip))
+-- Open the link box, empty or with pasted text in it.
+local function open_link(pasted)
+    local text = type(pasted) == 'string' and pasted:gsub('^%s+', ''):gsub('%s+$', '') or ''
+    link_text = text
+    uosc_menu('open-menu', build_link(text, text ~= ''))
+end
+
+local function paste_link()
+    open_link(mp.get_property('clipboard/text'))
 end
 
 local link_loading = false -- don't bring the start menu back while a link opens
@@ -782,24 +804,30 @@ local function start_download(url)
     end)
 end
 
-mp.register_script_message('link-pasted', function(text)
-    uosc_menu('open-menu', build_link(M.is_url(text)))
+mp.register_script_message('link-pasted', function(text) open_link(text) end)
+
+mp.register_script_message('link-typed', function(query)
+    if not link_text then return end
+    link_text = query or ''
+    uosc_menu('update-menu', build_link(link_text))
 end)
 
-mp.register_script_message('link-entered', function(query)
-    local url = M.is_url(query)
-    if url then
-        link_play(url)
-    else
-        uosc_menu('update-menu', build_link(nil, 'That is not a link — it should start with http'))
-    end
-end)
+-- Enter in the link box with no option picked: play what is in the box.
+local function link_enter()
+    local url = M.link_in(link_text)
+    if url then link_play(url) end
+end
 
 local actions -- defined below
 
 mp.register_script_message('menu-event', function(json)
     local event = utils.parse_json(json)
-    if type(event) ~= 'table' or event.type ~= 'activate' or type(event.value) ~= 'string' then return end
+    if type(event) ~= 'table' then return end
+    if event.type == 'key' and link_text and (event.id == 'enter' or event.id == 'kp_enter') then
+        link_enter()
+        return
+    end
+    if event.type ~= 'activate' or type(event.value) ~= 'string' then return end
     local value = event.value
     local keep = event.keep_open
     if not keep then close_menus() end
@@ -813,6 +841,7 @@ end)
 mp.register_script_message('menu-closed', function(menu_type)
     if menu_type == 'bailey-quick' then quick_open = false end
     if menu_type == 'bailey-link' then
+        link_text = nil
         mp.add_timeout(0.2, function() if not link_loading then open_start() end end)
     end
 end)
@@ -870,7 +899,7 @@ actions = {
     ['open-file'] = open_file_dialog,
     ['open-folder'] = open_folder_dialog,
     ['load'] = function(path) mp.commandv('loadfile', path, 'replace') end,
-    ['open-link'] = open_link,
+    ['open-link'] = function() open_link() end,
     ['link-play'] = link_play,
     ['link-download'] = start_download,
 }
@@ -996,7 +1025,8 @@ end)
 -------------------------------------------------------------------------------
 
 mp.register_script_message('open-file', open_file_dialog)
-mp.register_script_message('open-link', open_link)
+mp.register_script_message('open-link', function() open_link() end)
+mp.register_script_message('paste-link', paste_link)
 
 mp.register_event('end-file', function(event)
     if event and event.reason == 'error' and M.is_url(file.path) then

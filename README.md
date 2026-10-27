@@ -28,7 +28,7 @@ Optional:
 |---|---|
 | Open a video | **O**, or the folder button, or drop a file on the window |
 | Open a whole folder | **Shift+O** |
-| Play a web link (YouTube etc.) | Copy the link, then **Ctrl+V** and Enter. Or pick **Download best quality** to keep a copy in Videos › Bailey Player |
+| Play a web link (YouTube etc.) | Copy the link, then **Ctrl+V** and Enter. Or **Open a link…** for an empty box. **Shift+Backspace** clears the box. Pick **Download best quality** to keep a copy in Videos › Bailey Player |
 | Quick settings | **Right-click** anywhere |
 | Pause | **Space**, or click the picture |
 | Skip 10 s back / forward | **J** / **L**, or **←** / **→**, or the 10 buttons by play |
